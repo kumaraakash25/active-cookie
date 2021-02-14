@@ -1,23 +1,30 @@
 package com.finder.activecookie;
 
-import static org.awaitility.Awaitility.await;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ActiveCookieTest {
 
-    private final ByteArrayOutputStream outputStreamCaptor = new ByteArrayOutputStream();
+    private PrintStream stdout = System.out;
+    private ByteArrayOutputStream output = new ByteArrayOutputStream();
 
     @BeforeEach
     public void setUp() {
-        System.setOut(new PrintStream(outputStreamCaptor));
+        System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+    }
+
+    @AfterEach
+    void restoreSystemOutStream() {
+        System.setOut(stdout);
     }
 
     @Test
@@ -39,17 +46,10 @@ class ActiveCookieTest {
     }
 
     @Test
-    public void findActiveCookie_WhenOnlyOneCookieIsExpectedAsResult() throws IOException {
-        String[] args = {"-f", "test1.csv", "-d", "2018-12-09"};
-        ActiveCookie.findActiveCookie(args);
-        assertEquals("AtY0laUfhglK3lC7", outputStreamCaptor.toString().trim());
-    }
-
-    @Test
     public void findActiveCookie_WhenTwoCookiesAreExpectedAsResult() throws IOException {
         String[] args = {"-f", "test2.csv", "-d", "2018-12-09"};
         ActiveCookie.findActiveCookie(args);
-        await().until(() -> "AtY0laUfhglK3lC7\nSAZuXPGUrfbcn5UA".equals(outputStreamCaptor.toString().trim())
+        await().until(() -> "AtY0laUfhglK3lC7\nSAZuXPGUrfbcn5UA".equals(output.toString().trim())
         );
     }
 }
