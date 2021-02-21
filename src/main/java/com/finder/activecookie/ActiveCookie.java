@@ -1,16 +1,11 @@
 package com.finder.activecookie;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
-
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.Reader;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.io.*;
+import java.net.URI;
+import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.stream.Collectors;
 
 import org.apache.commons.csv.CSVFormat;
@@ -22,9 +17,15 @@ import org.joda.time.format.DateTimeFormatter;
 
 public class ActiveCookie {
 
+    // Extending the solution
+    //1. Read from multiple files
+    //2. Read from a variety of sources
+    //3. Improve performance
+
     private static final String CRITERIA_MATCHING_DATE_FORMAT = "yyyy-MM-dd";
     private static final String CSV_DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ssZ";
     private static final Map<String, Integer> cookieCounterRegistry = new HashMap<>();
+    private static ExecutorService service = Executors.newFixedThreadPool(5);
 
     public static void main(String[] args) throws IOException {
         findActiveCookie(args);
@@ -39,13 +40,18 @@ public class ActiveCookie {
      * </ul>
      *
      * @param args
-     * @throws IOException
      */
     public static void findActiveCookie(String[] args) throws IOException {
         validateInput(args);
         LocalDate dateCriteria = getMatchingDateCriteria(args);
-        String absoluteFilePath = getAbsoluteFilePath(args);
-        filterRecords(dateCriteria, absoluteFilePath);
+        List<InputStream> fileStreams = getFileStreams(args);
+        fileStreams.forEach(fileStream -> {
+            try {
+                filterRecords(dateCriteria, fileStream);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
         List<String> results = analyseRegistry();
         results.forEach(System.out::println);
     }
@@ -57,22 +63,22 @@ public class ActiveCookie {
      * @param absoluteFilePath
      * @throws IOException
      */
-    private static void filterRecords(LocalDate dateCriteria, String absoluteFilePath) throws IOException {
+    private static void filterRecords(LocalDate dateCriteria, InputStream fileStream) throws IOException {
         DateTimeFormatter csvDateFormatter = DateTimeFormat.forPattern(CSV_DATE_FORMAT);
-        try (Reader reader = new FileReader(absoluteFilePath, UTF_8);
+        try (Reader reader = new InputStreamReader(fileStream);
              CSVParser csvParser = new CSVParser(reader, CSVFormat.DEFAULT.withFirstRecordAsHeader().withTrim())) {
-            for (CSVRecord record : csvParser) {
-                String cookie = record.get(0);
-                LocalDate logDate = csvDateFormatter.parseLocalDate(record.get(1));
+            csvParser.getRecords().stream().parallel().forEach(csvRecord -> {
+                String cookie = csvRecord.get(0);
+                LocalDate logDate = csvDateFormatter.parseLocalDate(csvRecord.get(1));
                 if (logDate.equals(dateCriteria)) {
                     updateRegistry(cookie);
                 }
                 if (logDate.isBefore(dateCriteria)) {
                     // As we have the logs sorted in desc order, when getting to the point where log date goes beyond criteria date
                     // break the iteration
-                    break;
+                    //break;
                 }
-            }
+            });
         }
     }
 
@@ -105,11 +111,41 @@ public class ActiveCookie {
      * @param args
      * @return String
      */
-    private static String getAbsoluteFilePath(String[] args) {
-        String fileName = args[InputCommandParam.FILE.getIndex() + 1];
+    private static List<InputStream> getFileStreams(String[] args) throws IOException {
+        String filesArg = args[InputCommandParam.FILE.getIndex() + 1];
+        // test.csv, test2.csv
         ClassLoader classLoader = ActiveCookie.class.getClassLoader();
-        File file = new File(Objects.requireNonNull(classLoader.getResource(fileName)).getFile());
-        return file.getAbsolutePath();
+        String[] files = filesArg.split(",");
+
+        List<String> filePats = new ArrayList<>();
+        for (int index = 0; index < files.length; index++) {
+            filePats.add(files[index]);
+        }
+        List<InputStream> inputFileStreams = new ArrayList<>();
+        filePats.forEach(filePath -> {
+            service.submit(() -> {
+                if (filePath.startsWith("http")) {
+                    // Remote file
+                    URI uri = URI.create(filePath);
+                    InputStream inputRemoteStream = null;
+                    try {
+                        inputRemoteStream = uri.toURL().openStream();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    inputFileStreams.add(inputRemoteStream);
+                } else {
+                    File file = new File(Objects.requireNonNull(classLoader.getResource(filePath)).getFile());
+                    try {
+                        inputFileStreams.add(new FileInputStream(file));
+                    } catch (FileNotFoundException e) {
+                        e.printStackTrace();
+                    }
+                }
+            });
+
+        });
+        return inputFileStreams;
     }
 
     /**
